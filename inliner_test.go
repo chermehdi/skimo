@@ -26,7 +26,8 @@ func (pr *MockProvider) GetReader(path string) (io.Reader, error) {
 
 func (pr *MockProviderMulti) GetReader(path string) (io.Reader, error) {
 	if path == "include/lib/tree.h" {
-		return strings.NewReader(`#include "../io/tree_reader.h"`), nil
+		return strings.NewReader(`#include "../io/tree_reader.h"
+		const int INF = 1 << 30;`), nil
 	}
 	if path == "include/lib/constants.h" {
 		return strings.NewReader(""), nil
@@ -46,7 +47,7 @@ func TestExtractLinks(t *testing.T) {
 	// #include "%something.hpp"
 	// #include "(../)/something*/something.(h|hpp|cc|cpp)"
 	provider := &MockProvider{}
-	links := ExtractLinks("include", `
+	links, _ := ExtractLinks("include", `
 		#include "strings.h"
 		#include "lib/constants.h"
 		#include "lib/tree.h"
@@ -64,7 +65,7 @@ func TestExtractLinksMultiLevel(t *testing.T) {
 	// #include "%something.hpp"
 	// #include "(../)/something*/something.(h|hpp|cc|cpp)"
 	provider := &MockProviderMulti{}
-	links := ExtractLinks("include", `
+	links, _ := ExtractLinks("include", `
 		#include "lib/tree.h"
 		#include "lib/constants.h"
 		#include <iostream>
@@ -78,10 +79,63 @@ func TestExtractLinksMultiLevel(t *testing.T) {
 func TestExtractLinksNoLinks(t *testing.T) {
 
 	provider := &MockProvider{}
-	links := ExtractLinks("include", `
+	links, _ := ExtractLinks("include", `
 		#include <vector>
 		#include <iostream>
     `, provider)
 
 	assert.Equal(t, 0, len(links))
+}
+
+func TestInliner_NothingToInline(t *testing.T) {
+	provider := &MockProvider{}
+	inliner, err := NewInlinerWithProvider("include", []string{}, provider)
+	assert.NoError(t, err)
+	cppFile := `#include <iostream>
+		#include <vector>
+
+		int main() {
+		}
+	`
+	content, err := inliner.Inline(strings.NewReader(cppFile))
+	assert.NoError(t, err)
+	assert.Equal(t, cppFile, content)
+}
+
+func TestInliner_OneDependencyLevel(t *testing.T) {
+	provider := &MockProviderMulti{}
+	inliner, err := NewInlinerWithProvider("include", []string{}, provider)
+	assert.NoError(t, err)
+	cppFile := `#include <iostream>
+		#include <vector>
+		#include "lib/tree.h" 
+		int main() {
+		}
+	`
+	content, err := inliner.Inline(strings.NewReader(cppFile))
+	assert.NoError(t, err)
+	assert.True(t, strings.Contains(content, "#include <vector>"))
+	assert.False(t, strings.Contains(content, "#include \"lib/tree.h\""))
+	assert.True(t, strings.Contains(content, "const int INF = 1 << 30;"))
+}
+
+func TestInliner_MultipleDependencyLevels(t *testing.T) {
+	provider := &MockProviderMulti{}
+	inliner, err := NewInlinerWithProvider("include", []string{}, provider)
+	assert.NoError(t, err)
+	cppFile := `#include <iostream>
+		#include <vector>
+		#include "tree_reader.h"
+		#include "lib/constants.h"
+		#include "lib/tree.h" 
+		int main() {
+		}
+	`
+	content, err := inliner.Inline(strings.NewReader(cppFile))
+	assert.NoError(t, err)
+	assert.True(t, strings.Contains(content, "#include <vector>"))
+	assert.False(t, strings.Contains(content, "#include \"lib/tree.h\""))
+	assert.False(t, strings.Contains(content, "#include \"io/tree_reader.h\""))
+	assert.False(t, strings.Contains(content, "#include \"tree_reader.h\""))
+	assert.True(t, strings.Contains(content, "const int INF = 1 << 30;"))
 }

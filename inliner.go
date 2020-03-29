@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -27,8 +28,9 @@ func (rp *DefaultReaderProvider) GetReader(path string) (io.Reader, error) {
 }
 
 type Inliner struct {
-	includeDir string
-	excludes   []*regexp.Regexp
+	includeDir     string
+	excludes       []*regexp.Regexp
+	readerProvider ReaderProvider
 }
 
 type Link struct {
@@ -36,47 +38,72 @@ type Link struct {
 	to   string
 }
 
-func readContent(path string, provider ReaderProvider) string {
-	reader, _ := provider.GetReader(path)
-	scanner := bufio.NewScanner(reader)
-	content := ""
-	for scanner.Scan() {
-		content += scanner.Text()
-		content += "\n"
+type IncludeSet struct {
+	includes []string
+}
+
+func NewIncludeSet() *IncludeSet {
+	return &IncludeSet{
+		includes: make([]string, 0),
 	}
-	return content
+}
+
+func (is *IncludeSet) Add(include string) {
+	is.includes = append(is.includes, include)
+}
+
+// Get the set of unique includes found in the include set, by their insertion order.
+// This is done by starting with the base includes, then moving to the next ones.
+func (is *IncludeSet) GetUniqueOrdered(base []string) []string {
+	result := make([]string, 0)
+	seen := NewSet()
+	for _, include := range base {
+		if !seen.Has(include) {
+			seen.Add(include)
+			result = append(result, include)
+		}
+	}
+	for _, include := range is.includes {
+		if !seen.Has(include) {
+			seen.Add(include)
+			result = append(result, include)
+		}
+	}
+	return result
 }
 
 // Extract links
 // currentRoot should always be a directory.
-func ExtractLinks(currentRoot string, content string, provider ReaderProvider) []Link {
+func ExtractLinks(currentRoot string, content string, provider ReaderProvider) ([]Link, *IncludeSet) {
 	result := make([]Link, 0)
 	set := NewSet()
-	extractLinks(currentRoot, content, &set, &result, provider)
-	return result
+	includeSet := NewIncludeSet()
+	// TODO(chermehdi): cleanup, too many arguments
+	extractLinks(currentRoot, "main.cpp", content, &set, &result, provider, includeSet)
+	return result, includeSet
 }
 
-func extractLinks(currentRoot string, content string, set *Set, result *[]Link, provider ReaderProvider) {
-	if set.Has(currentRoot) {
-		return
-	}
-	set.Add(currentRoot)
+func extractLinks(currentRoot string, lastFile string, content string, set *Set, result *[]Link, provider ReaderProvider, includeSet *IncludeSet) {
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
+		if isIncludeLine(line) {
+			includeSet.Add(line)
+		}
 		if IncludeRegex.MatchString(line) {
 			filePath := IncludeRegex.FindStringSubmatch(line)[1]
 			newFilePath := path.Join(currentRoot, filePath)
-			*result = append(*result, Link{currentRoot, newFilePath})
+			if set.Has(newFilePath) {
+				continue
+			}
+			set.Add(newFilePath)
+			*result = append(*result, Link{lastFile, newFilePath})
 			newFileContent := readContent(newFilePath, provider)
-			extractLinks(path.Dir(newFilePath), newFileContent, set, result, provider)
+			extractLinks(path.Dir(newFilePath), newFilePath, newFileContent, set, result, provider, includeSet)
 		}
 	}
 }
 
-// Creates a new instance of the Inliner type.
-// includeDir: the root directory of your cpp library.
-// excludes: regular expressions denoting file paths to ignore from inlining
-func NewInliner(includeDir string, excludes []string) (*Inliner, error) {
+func NewInlinerWithProvider(includeDir string, excludes []string, provider ReaderProvider) (*Inliner, error) {
 	n := len(excludes)
 	excludesRegex := make([]*regexp.Regexp, n)
 	for i, value := range excludes {
@@ -86,17 +113,32 @@ func NewInliner(includeDir string, excludes []string) (*Inliner, error) {
 		}
 		excludesRegex[i] = compiledRegex
 	}
-	return &Inliner{includeDir, excludesRegex}, nil
+	return &Inliner{includeDir, excludesRegex, provider}, nil
+}
+
+// Creates a new instance of the Inliner type.
+// includeDir: the root directory of your cpp library.
+// excludes: regular expressions denoting file paths to ignore from inlining
+func NewInliner(includeDir string, excludes []string) (*Inliner, error) {
+	return NewInlinerWithProvider(includeDir, excludes, &DefaultReaderProvider{})
 }
 
 // Returns true if the current line starts with a #include
 func isIncludeLine(line string) bool {
-	return strings.HasPrefix(strings.TrimLeft(line, " "), "#include")
+	return IncludeRegexStd.MatchString(line)
 }
 
 // Returns a string aggregating all the contents of the files given by the argument array.
-func filesContent(order []string) string {
-	return ""
+func filesContent(order []string, provider ReaderProvider) string {
+	content := ""
+	// process in reverse order
+	n := len(order)
+	for i := n - 1; i >= 0; i-- {
+		content += fmt.Sprintf("// BEGIN %s\n", order[i])
+		content += readContentExcludeIncludes(order[i], provider)
+		content += fmt.Sprintf("// END %s\n", order[i])
+	}
+	return content
 }
 
 func (inliner *Inliner) Inline(reader io.Reader) (string, error) {
@@ -104,31 +146,38 @@ func (inliner *Inliner) Inline(reader io.Reader) (string, error) {
 	lines := make([]string, 0)
 	seenIncludes := NewSet()
 	insertPosition, lineNumber := 0, 0
+	firstLevelIncludes := make([]string, 0)
+	currentFileContent := ""
 	for scanner.Scan() {
 		currentLine := scanner.Text()
 		if !IncludeRegex.MatchString(currentLine) {
 			lines = append(lines, currentLine)
 		}
-		if isIncludeLine(currentLine) && IncludeRegexStd.MatchString(currentLine) {
-			libraryName := IncludeRegexStd.FindStringSubmatch(currentLine)[1]
-			seenIncludes.Add(libraryName)
+		if isIncludeLine(currentLine) /* && IncludeRegexStd.MatchString(currentLine) */ {
+			firstLevelIncludes = append(firstLevelIncludes, currentLine)
 			insertPosition = lineNumber
 		}
+		currentFileContent += currentLine + "\n"
 		lineNumber++
 	}
-	provider := DefaultReaderProvider{}
-	links := ExtractLinks(inliner.includeDir, strings.Join(lines, "\n"), &provider)
+	links, includeSet := ExtractLinks(inliner.includeDir, currentFileContent, inliner.readerProvider)
 	graph := NewGraph(links, seenIncludes)
 	fileOrder := graph.GetTopologicalOrder(inliner.includeDir)
 	content := ""
+	for _, include := range includeSet.GetUniqueOrdered(firstLevelIncludes) {
+		content += include + "\n"
+	}
 	// a -> b
 	// b -> c
 	// a -> d
 	// c -> d
-	for i, _ := range lines {
-		if i == insertPosition {
-			content += filesContent(fileOrder)
+	content += filesContent(fileOrder, inliner.readerProvider)
+	for i := insertPosition + 1; i < len(lines); i++ {
+		// we don't want a trailing new line
+		if i > insertPosition+1 {
+			content += "\n"
 		}
+		content += lines[i]
 	}
 	return content, nil
 }
