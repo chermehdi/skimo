@@ -31,6 +31,7 @@ type Inliner struct {
 	includeDir     string
 	excludes       []*regexp.Regexp
 	readerProvider ReaderProvider
+	verbose        bool
 }
 
 type Link struct {
@@ -74,16 +75,16 @@ func (is *IncludeSet) GetUniqueOrdered(base []string) []string {
 
 // Extract links
 // currentRoot should always be a directory.
-func ExtractLinks(currentRoot string, content string, provider ReaderProvider) ([]Link, *IncludeSet) {
+func ExtractLinks(currentRoot string, content string, provider ReaderProvider, verbose bool) ([]Link, *IncludeSet) {
 	result := make([]Link, 0)
 	set := NewSet()
 	includeSet := NewIncludeSet()
 	// TODO(chermehdi): cleanup, too many arguments
-	extractLinks(currentRoot, "main.cpp", content, &set, &result, provider, includeSet)
+	extractLinks(currentRoot, "main.cpp", content, &set, &result, provider, includeSet, &verbose)
 	return result, includeSet
 }
 
-func extractLinks(currentRoot string, lastFile string, content string, set *Set, result *[]Link, provider ReaderProvider, includeSet *IncludeSet) {
+func extractLinks(currentRoot string, lastFile string, content string, set *Set, result *[]Link, provider ReaderProvider, includeSet *IncludeSet, verbose *bool) {
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
 		if isIncludeLine(line) {
@@ -97,13 +98,16 @@ func extractLinks(currentRoot string, lastFile string, content string, set *Set,
 			}
 			set.Add(newFilePath)
 			*result = append(*result, Link{lastFile, newFilePath})
+			if *verbose {
+				_, _ = fmt.Fprintf(os.Stderr, "Reading the file %s\n", newFilePath)
+			}
 			newFileContent := readContent(newFilePath, provider)
-			extractLinks(path.Dir(newFilePath), newFilePath, newFileContent, set, result, provider, includeSet)
+			extractLinks(path.Dir(newFilePath), newFilePath, newFileContent, set, result, provider, includeSet, verbose)
 		}
 	}
 }
 
-func NewInlinerWithProvider(includeDir string, excludes []string, provider ReaderProvider) (*Inliner, error) {
+func NewInlinerWithProvider(includeDir string, excludes []string, verbose bool, provider ReaderProvider) (*Inliner, error) {
 	n := len(excludes)
 	excludesRegex := make([]*regexp.Regexp, n)
 	for i, value := range excludes {
@@ -113,14 +117,14 @@ func NewInlinerWithProvider(includeDir string, excludes []string, provider Reade
 		}
 		excludesRegex[i] = compiledRegex
 	}
-	return &Inliner{includeDir, excludesRegex, provider}, nil
+	return &Inliner{includeDir, excludesRegex, provider, verbose}, nil
 }
 
 // Creates a new instance of the Inliner type.
 // includeDir: the root directory of your cpp library.
 // excludes: regular expressions denoting file paths to ignore from inlining
-func NewInliner(includeDir string, excludes []string) (*Inliner, error) {
-	return NewInlinerWithProvider(includeDir, excludes, &DefaultReaderProvider{})
+func NewInliner(includeDir string, verbose bool, excludes []string) (*Inliner, error) {
+	return NewInlinerWithProvider(includeDir, excludes, verbose, &DefaultReaderProvider{})
 }
 
 // Returns true if the current line starts with a #include
@@ -160,7 +164,7 @@ func (inliner *Inliner) Inline(reader io.Reader) (string, error) {
 		currentFileContent += currentLine + "\n"
 		lineNumber++
 	}
-	links, includeSet := ExtractLinks(inliner.includeDir, currentFileContent, inliner.readerProvider)
+	links, includeSet := ExtractLinks(inliner.includeDir, currentFileContent, inliner.readerProvider, inliner.verbose)
 	graph := NewGraph(links, seenIncludes)
 	fileOrder := graph.GetTopologicalOrder(inliner.includeDir)
 	content := ""
