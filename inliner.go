@@ -137,7 +137,7 @@ func filesContent(order []string, provider ReaderProvider) string {
 	content := ""
 	// process in reverse order
 	n := len(order)
-	for i := n - 1; i >= 0; i-- {
+	for i := 0; i < n; i++ {
 		content += fmt.Sprintf("// BEGIN %s\n", order[i])
 		content += readContentExcludeIncludes(order[i], provider)
 		content += fmt.Sprintf("// END %s\n", order[i])

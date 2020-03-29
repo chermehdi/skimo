@@ -52,7 +52,7 @@ func TestExtractLinks(t *testing.T) {
 		#include "lib/constants.h"
 		#include "lib/tree.h"
 		#include <iostream>
-    `, provider)
+    `, provider, false)
 	assert.Equal(t, 3, len(links))
 	assert.Equal(t, "include/strings.h", links[0].to)
 	assert.Equal(t, "include/lib/constants.h", links[1].to)
@@ -69,7 +69,7 @@ func TestExtractLinksMultiLevel(t *testing.T) {
 		#include "lib/tree.h"
 		#include "lib/constants.h"
 		#include <iostream>
-    `, provider)
+    `, provider, false)
 	assert.Equal(t, 3, len(links))
 	assert.Equal(t, "include/lib/tree.h", links[0].to)
 	assert.Equal(t, "include/io/tree_reader.h", links[1].to)
@@ -82,14 +82,14 @@ func TestExtractLinksNoLinks(t *testing.T) {
 	links, _ := ExtractLinks("include", `
 		#include <vector>
 		#include <iostream>
-    `, provider)
+    `, provider, false)
 
 	assert.Equal(t, 0, len(links))
 }
 
 func TestInliner_NothingToInline(t *testing.T) {
 	provider := &MockProvider{}
-	inliner, err := NewInlinerWithProvider("include", []string{}, provider)
+	inliner, err := NewInlinerWithProvider("include", []string{}, false, provider)
 	assert.NoError(t, err)
 	cppFile := `#include <iostream>
 		#include <vector>
@@ -104,7 +104,7 @@ func TestInliner_NothingToInline(t *testing.T) {
 
 func TestInliner_OneDependencyLevel(t *testing.T) {
 	provider := &MockProviderMulti{}
-	inliner, err := NewInlinerWithProvider("include", []string{}, provider)
+	inliner, err := NewInlinerWithProvider("include", []string{}, false, provider)
 	assert.NoError(t, err)
 	cppFile := `#include <iostream>
 		#include <vector>
@@ -121,7 +121,7 @@ func TestInliner_OneDependencyLevel(t *testing.T) {
 
 func TestInliner_MultipleDependencyLevels(t *testing.T) {
 	provider := &MockProviderMulti{}
-	inliner, err := NewInlinerWithProvider("include", []string{}, provider)
+	inliner, err := NewInlinerWithProvider("include", []string{}, false, provider)
 	assert.NoError(t, err)
 	cppFile := `#include <iostream>
 		#include <vector>
