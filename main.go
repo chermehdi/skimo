@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/chermehdi/skimo/skimo"
 	"os"
 	"path"
 )
@@ -16,7 +17,7 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Print debug log")
 	flag.Parse()
 
-	inliner, err := NewInliner(*includeDir, *verbose, []string{""})
+	inliner, err := skimo.NewInliner(*includeDir, *verbose, []string{""})
 	if err != nil {
 		handleError(err)
 	}

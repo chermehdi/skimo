@@ -1,4 +1,4 @@
-package main
+package skimo
 
 import (
 	"fmt"

@@ -1,6 +1,8 @@
-package main
+package skimo
 
-import "bufio"
+import (
+	"bufio"
+)
 
 type PathPredicate func(string) bool
 
