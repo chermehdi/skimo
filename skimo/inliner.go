@@ -2,6 +2,7 @@ package skimo
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -132,15 +133,29 @@ func isIncludeLine(line string) bool {
 	return IncludeRegexStd.MatchString(line)
 }
 
+func stringFirstNParts(parts []string, n int) (string, error) {
+	partsLen := len(parts)
+	if partsLen < n {
+		return "", errors.New(fmt.Sprintf("Could not strip %d parts from a slice with size %d.", len(parts), n))
+	}
+	result := parts[n:partsLen]
+	return path.Join(result...), nil
+}
+
 // Returns a string aggregating all the contents of the files given by the argument array.
-func filesContent(order []string, provider ReaderProvider) string {
+func filesContent(order []string, provider ReaderProvider, includeDir string) string {
 	content := ""
+	includeDirPartLen := len(strings.Split(includeDir, string(os.PathSeparator)))
 	// process in reverse order
 	n := len(order)
 	for i := 0; i < n; i++ {
-		content += fmt.Sprintf("// BEGIN %s\n", order[i])
+		parts, err := stringFirstNParts(strings.Split(order[i], string(os.PathSeparator)), includeDirPartLen)
+		if err != nil {
+			panic(err)
+		}
+		content += fmt.Sprintf("// BEGIN %s\n", parts)
 		content += readContentExcludeIncludes(order[i], provider)
-		content += fmt.Sprintf("// END %s\n", order[i])
+		content += fmt.Sprintf("// END %s\n", parts)
 	}
 	return content
 }
@@ -175,7 +190,7 @@ func (inliner *Inliner) Inline(reader io.Reader) (string, error) {
 	// b -> c
 	// a -> d
 	// c -> d
-	content += filesContent(fileOrder, inliner.readerProvider)
+	content += filesContent(fileOrder, inliner.readerProvider, inliner.includeDir)
 	for i := insertPosition + 1; i < len(lines); i++ {
 		// we don't want a trailing new line
 		if i > insertPosition+1 {
