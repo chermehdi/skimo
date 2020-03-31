@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/stretchr/testify/assert"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -138,4 +139,18 @@ func TestInliner_MultipleDependencyLevels(t *testing.T) {
 	assert.False(t, strings.Contains(content, "#include \"io/tree_reader.h\""))
 	assert.False(t, strings.Contains(content, "#include \"tree_reader.h\""))
 	assert.True(t, strings.Contains(content, "const int INF = 1 << 30;"))
+}
+
+func TestInliner_StripFirstN(t *testing.T) {
+	// Happy path
+	value, err := stringFirstNParts([]string{"hello", "world", "test"}, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(strings.Split(value, string(os.PathSeparator))))
+	// Don't remove anything
+	value, err = stringFirstNParts([]string{"hello", "world", "test"}, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, len(strings.Split(value, string(os.PathSeparator))))
+	// Panic
+	_, err = stringFirstNParts([]string{"hello", "world", "test"}, 4)
+	assert.Error(t, err)
 }
