@@ -154,3 +154,16 @@ func TestInliner_StripFirstN(t *testing.T) {
 	_, err = stringFirstNParts([]string{"hello", "world", "test"}, 4)
 	assert.Error(t, err)
 }
+
+func TestInliner_LeavesDocumentationComments(t *testing.T) {
+	provider := &MockProviderMulti{}
+	inliner, err := NewInlinerWithProvider("include", []string{}, false, provider)
+	assert.NoError(t, err)
+	cppFile := "//\n" + "// @author MaxHeap\n" + "// Some other comment\n" + "#include <iostream>\n" + "#include <vector>\n" + "#include \"lib/tree.h\"" + "int main() {\n" + "}"
+	content, err := inliner.Inline(strings.NewReader(cppFile))
+	assert.NoError(t, err)
+	assert.True(t, strings.HasPrefix(content, "//\n// @author MaxHeap\n// Some other comment"))
+	assert.True(t, strings.Contains(content, "#include <vector>"))
+	assert.False(t, strings.Contains(content, "#include \"lib/tree.h\""))
+	assert.True(t, strings.Contains(content, "const int INF = 1 << 30;"))
+}

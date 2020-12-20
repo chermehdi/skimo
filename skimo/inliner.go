@@ -167,8 +167,19 @@ func (inliner *Inliner) Inline(reader io.Reader) (string, error) {
 	insertPosition, lineNumber := 0, 0
 	firstLevelIncludes := make([]string, 0)
 	currentFileContent := ""
+	headerComments := ""
+	finishedHeaderComments := false
 	for scanner.Scan() {
 		currentLine := scanner.Text()
+		// if strings.Trim(currentLine, " \n\t\r") == "" {
+		// 	continue
+		// }
+		if !finishedHeaderComments && strings.HasPrefix(currentLine, "//") {
+			// We want to preserve comments
+			headerComments += currentLine + "\n"
+			continue
+		}
+		finishedHeaderComments = true
 		if !IncludeRegex.MatchString(currentLine) {
 			lines = append(lines, currentLine)
 		}
@@ -182,7 +193,7 @@ func (inliner *Inliner) Inline(reader io.Reader) (string, error) {
 	links, includeSet := ExtractLinks(inliner.includeDir, currentFileContent, inliner.readerProvider, inliner.verbose)
 	graph := NewGraph(links, seenIncludes)
 	fileOrder := graph.GetTopologicalOrder(inliner.includeDir)
-	content := ""
+	content := headerComments
 	for _, include := range includeSet.GetUniqueOrdered(firstLevelIncludes) {
 		content += include + "\n"
 	}
